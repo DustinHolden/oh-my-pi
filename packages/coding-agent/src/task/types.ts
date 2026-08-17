@@ -173,6 +173,12 @@ export interface AgentDefinition {
 	thinkingLevel?: ThinkingLevel;
 	output?: unknown;
 	blocking?: boolean;
+	/**
+	 * Whether to retain the generic interactive base prompt.
+	 * Set false for focused agents whose own prompt and tool schemas provide the required contract.
+	 * Project context and later prompt segments are still retained.
+	 */
+	inheritBasePrompt?: boolean;
 	autoloadSkills?: string[];
 	source: AgentSource;
 	filePath?: string;

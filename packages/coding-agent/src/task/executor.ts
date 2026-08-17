@@ -1236,9 +1236,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 							ircPeers: ircEnabled ? renderIrcPeerRoster(id) : "",
 							ircSelfId: ircEnabled ? id : "",
 						});
-						return defaultPrompt.length === 0
+						const inheritedPrompt = agent.inheritBasePrompt === false ? defaultPrompt.slice(1) : defaultPrompt;
+						return inheritedPrompt.length === 0
 							? [subagentPrompt]
-							: [...defaultPrompt.slice(0, -1), subagentPrompt, defaultPrompt[defaultPrompt.length - 1]];
+							: [...inheritedPrompt.slice(0, -1), subagentPrompt, inheritedPrompt[inheritedPrompt.length - 1]];
 					},
 					sessionManager,
 					hasUI: false,

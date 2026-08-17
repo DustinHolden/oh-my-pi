@@ -27,6 +27,7 @@ interface AgentFrontmatter {
 	model?: string | string[];
 	thinkingLevel?: string;
 	blocking?: boolean;
+	inheritBasePrompt?: boolean;
 }
 
 interface EmbeddedAgentDef {
@@ -38,7 +39,11 @@ interface EmbeddedAgentDef {
 function buildAgentContent(def: EmbeddedAgentDef): string {
 	const body = prompt.render(def.template);
 	if (!def.frontmatter) return body;
-	return prompt.render(agentFrontmatterTemplate, { ...def.frontmatter, body });
+	return prompt.render(agentFrontmatterTemplate, {
+		...def.frontmatter,
+		omitBasePrompt: def.frontmatter.inheritBasePrompt === false,
+		body,
+	});
 }
 
 const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
@@ -56,6 +61,7 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 			spawns: "*",
 			model: "pi/task",
 			thinkingLevel: Effort.Medium,
+			inheritBasePrompt: false,
 		},
 		template: taskMd,
 	},
@@ -66,6 +72,7 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 			description: "Low-reasoning agent for strictly mechanical updates or data collection only",
 			model: "pi/smol",
 			thinkingLevel: Effort.Minimal,
+			inheritBasePrompt: false,
 		},
 		template: taskMd,
 	},

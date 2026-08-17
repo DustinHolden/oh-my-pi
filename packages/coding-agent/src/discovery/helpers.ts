@@ -213,6 +213,7 @@ export interface ParsedAgentFields {
 	thinkingLevel?: ThinkingLevel;
 	autoloadSkills?: string[];
 	blocking?: boolean;
+	inheritBasePrompt?: boolean;
 }
 
 /**
@@ -265,10 +266,22 @@ export function parseAgentFields(frontmatter: Record<string, unknown>): ParsedAg
 	const thinkingLevel = parseThinkingLevel(rawThinkingLevel);
 	const model = parseModelList(frontmatter.model);
 	const blocking = parseBoolean(frontmatter.blocking);
+	const inheritBasePrompt = parseBoolean(frontmatter.inheritBasePrompt);
 	const autoloadSkills = parseArrayOrCSV(frontmatter.autoloadSkills)
 		?.map(s => s.trim())
 		.filter(Boolean);
-	return { name, description, tools, spawns, model, output, thinkingLevel, blocking, autoloadSkills };
+	return {
+		name,
+		description,
+		tools,
+		spawns,
+		model,
+		output,
+		thinkingLevel,
+		blocking,
+		autoloadSkills,
+		inheritBasePrompt,
+	};
 }
 
 async function globIf(

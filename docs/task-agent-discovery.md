@@ -24,7 +24,7 @@ It covers runtime behavior as implemented today, including precedence, invalid-d
 Task agents normalize into `AgentDefinition` (`src/task/types.ts`):
 
 - `name`, `description`, `systemPrompt` (required for a valid loaded agent)
-- optional `tools`, `spawns`, `model`, `thinkingLevel`, `output`, `blocking`
+- optional `tools`, `spawns`, `model`, `thinkingLevel`, `output`, `blocking`, `autoloadSkills`, `inheritBasePrompt`
 - `source`: `"bundled" | "user" | "project"`
 - optional `filePath`
 
@@ -36,6 +36,16 @@ Parsing comes from frontmatter via `parseAgentFields()` (`src/discovery/helpers.
 - backward-compat behavior: if `spawns` missing but `tools` includes `task`, `spawns` becomes `*`
 - `output` is passed through as opaque schema data
 
+### Prompt inheritance
+
+Subagents normally retain the generic interactive base prompt, then add their agent-specific role and task context before the final project/current-context segment. An agent can set:
+
+```yaml
+inheritBasePrompt: false
+```
+
+This removes only the first generic base-prompt segment. The agent prompt, task `context`, project context, current-context segments, selected tool schemas, and output schema remain. Use it for focused local agents with a complete role prompt; do not use it to compensate for an underspecified agent or task assignment.
+
 ## Bundled agents
 
 Bundled agents are embedded at build time (`src/task/agents.ts`) using text imports.
@@ -44,6 +54,8 @@ Bundled agents are embedded at build time (`src/task/agents.ts`) using text impo
 
 - `explore`, `plan`, `designer`, `reviewer` from prompt files
 - `task` and `quick_task` from shared `task.md` body plus injected frontmatter
+
+The focused worker agents `explore`, `task`, and `quick_task` set `inheritBasePrompt: false`; their complete agent contracts, project context, task context, tool schemas, and output schemas remain.
 
 Loading path:
 
