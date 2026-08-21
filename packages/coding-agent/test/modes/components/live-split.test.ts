@@ -1,5 +1,10 @@
-import { beforeAll, describe, expect, it } from "bun:test";
-import { LiveSplit } from "@oh-my-pi/pi-coding-agent/modes/components/live-split";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import {
+	LIVE_SPLIT_LAYOUT,
+	LiveSplit,
+	setComposerColumn,
+	transcriptColumnWidth,
+} from "@oh-my-pi/pi-coding-agent/modes/components/live-split";
 import * as themeModule from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { type Component, CURSOR_MARKER, visibleWidth } from "@oh-my-pi/pi-tui";
 
@@ -81,5 +86,85 @@ describe("LiveSplit", () => {
 		split.render(200);
 		expect(split.getNativeScrollbackLiveRegionStart()).toBe(0);
 		expect(split.isNativeScrollbackLiveRegionPinned()).toBe(true);
+	});
+});
+
+/**
+ * Column layout: the composer leaves the bottom of the frame for the right
+ * column and the transcript keeps the left one. The transcript is not a child
+ * of the split (its rows are already committed), so the contract is split in
+ * two: `transcriptColumnWidth` reserves the columns and the split fills them.
+ */
+describe("LiveSplit composer column", () => {
+	beforeAll(async () => {
+		await themeModule.initTheme(false, undefined, undefined, "dark", "light");
+	});
+
+	afterEach(() => {
+		setComposerColumn(false);
+	});
+
+	it("reserves the composer's columns for the transcript only while enabled", () => {
+		expect(transcriptColumnWidth(200)).toBe(200);
+		setComposerColumn(true);
+		// Composer takes maxRail (96) plus the 3-column divider: a column the
+		// user types in is not capped to a third of the frame the way a rail is.
+		expect(transcriptColumnWidth(200)).toBe(101);
+		// 130 columns is below 3 * minRail, so a third-cap would have killed the
+		// layout here: the composer gets what is left above the 60-column floor.
+		expect(transcriptColumnWidth(130)).toBe(60);
+		// Too narrow for a 56-column composer beside 60 columns of transcript:
+		// the layout collapses and the transcript keeps the full width.
+		expect(transcriptColumnWidth(100)).toBe(100);
+		expect(transcriptColumnWidth(118)).toBe(118);
+		// 119 = minLeft 60 + minRail 56 + divider 3: the exact floor.
+		expect(transcriptColumnWidth(119)).toBe(60);
+	});
+
+	it("moves the composer into the right column under the HUDs", () => {
+		setComposerColumn(true);
+		const split = new LiveSplit([stub(["> prompt"])], [stub(["TODO 1"])], LIVE_SPLIT_LAYOUT);
+		const lines = split.render(200);
+
+		expect(lines.length).toBe(2);
+		// HUD first, composer below it - both in the right column at 101 + 3.
+		expect(Bun.stripANSI(lines[0]!).indexOf("TODO 1")).toBe(104);
+		expect(Bun.stripANSI(lines[1]!).indexOf("> prompt")).toBe(104);
+		// Left column is the transcript's: the split leaves it blank.
+		expect(Bun.stripANSI(lines[1]!).slice(0, 101).trim()).toBe("");
+	});
+
+	it("renders the composer at the column width, not the terminal width", () => {
+		setComposerColumn(true);
+		const seen: number[] = [];
+		const split = new LiveSplit([widthProbe(seen)], [stub(["TODO 1"])], LIVE_SPLIT_LAYOUT);
+		split.render(200);
+
+		expect(seen).toEqual([96]);
+	});
+
+	it("spans the footer across both columns in either layout", () => {
+		const footerSeen: number[] = [];
+		const split = new LiveSplit([stub(["> prompt"])], [stub(["TODO 1"])], LIVE_SPLIT_LAYOUT, [
+			widthProbe(footerSeen),
+		]);
+
+		split.render(200);
+		setComposerColumn(true);
+		split.render(200);
+
+		expect(footerSeen).toEqual([200, 200]);
+		// Footer is the last row, below both columns.
+		const lines = split.render(200);
+		expect(Bun.stripANSI(lines.at(-1)!)).toBe("x");
+	});
+
+	it("collapses to the plain stack when the terminal is too narrow", () => {
+		setComposerColumn(true);
+		const split = new LiveSplit([stub(["> prompt"])], [stub(["TODO 1"])], LIVE_SPLIT_LAYOUT, [stub(["status"])]);
+		const lines = split.render(100).map(line => Bun.stripANSI(line));
+
+		// Stacked order with the composer back at the bottom, footer last.
+		expect(lines).toEqual(["TODO 1", "> prompt", "status"]);
 	});
 });
