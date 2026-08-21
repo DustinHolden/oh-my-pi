@@ -86,6 +86,7 @@ import { AssistantMessageComponent } from "../components/assistant-message";
 import { CopySelectorComponent } from "../components/copy-selector";
 import { ExtensionDashboard } from "../components/extensions";
 import { HistorySearchComponent } from "../components/history-search";
+import { setComposerColumn } from "../components/live-split";
 import { LoginDialogComponent } from "../components/login-dialog";
 import { LogoutAccountSelectorComponent } from "../components/logout-account-selector";
 import { ModelHubComponent, type ModelRoleSelectionScope } from "../components/model-hub";
@@ -586,6 +587,15 @@ export class SelectorController {
 				// were wrapped at (the documented resize behaviour); everything still
 				// live re-wraps on the next paint.
 				setMaxContentWidth(value as number);
+				this.ctx.ui.invalidate();
+				this.ctx.ui.requestRender();
+				break;
+
+			case "tui.composerColumn":
+				// Same seam as maxContentWidth: the live region relays at the new
+				// geometry, transcript rows already in native scrollback keep the
+				// width they were painted at.
+				setComposerColumn(value as boolean);
 				this.ctx.ui.invalidate();
 				this.ctx.ui.requestRender();
 				break;

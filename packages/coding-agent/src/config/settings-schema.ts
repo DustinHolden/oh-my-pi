@@ -1271,6 +1271,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"tui.composerColumn": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Composer Column",
+			description:
+				"Move the composer out of the bottom of the screen and into a column on the right, beside the transcript, with the todo and subagent HUDs stacked above it. Needs roughly 120 columns; below that the layout collapses to the normal stack. Transcript rows already committed to the terminal's scrollback keep their original width",
+		},
+	},
+
 	"display.shimmer": {
 		type: "enum",
 		values: ["classic", "kitt", "disabled"] as const,

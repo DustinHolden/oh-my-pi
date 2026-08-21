@@ -168,7 +168,7 @@ import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
-import { LiveSplit } from "./components/live-split";
+import { LIVE_SPLIT_LAYOUT, LiveSplit, setComposerColumn, transcriptColumnWidth } from "./components/live-split";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
@@ -412,6 +412,29 @@ class AnchoredLiveContainer extends Container implements NativeScrollbackLiveReg
 
 	isNativeScrollbackLiveRegionPinned(): boolean {
 		return true;
+	}
+}
+
+/**
+ * Transcript that reserves the composer's column while `tui.composerColumn` is
+ * on. The split below owns only live rows, so anything that commits to native
+ * scrollback has to narrow itself - and because a committed row can never be
+ * re-laid-out, flipping the setting reflows only what is still live.
+ */
+class ColumnTranscriptContainer extends TranscriptContainer {
+	override render(width: number): readonly string[] {
+		return super.render(transcriptColumnWidth(width));
+	}
+
+	override renderViewportTail(width: number, maxRows: number): readonly string[] {
+		return super.renderViewportTail(transcriptColumnWidth(width), maxRows);
+	}
+}
+
+/** {@link AnchoredLiveContainer} in the transcript's column (queued messages). */
+class ColumnAnchoredLiveContainer extends AnchoredLiveContainer {
+	override render(width: number): readonly string[] {
+		return super.render(transcriptColumnWidth(width));
 	}
 }
 
@@ -818,6 +841,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		setTuiTight(settings.get("tui.tight"));
 		setMaxContentWidth(settings.get("tui.maxContentWidth"));
+		setComposerColumn(settings.get("tui.composerColumn"));
 		setMarkdownMermaidRendering(settings.get("tui.renderMermaid"));
 		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"));
 		this.ui.setMaxInlineImages(settings.get("tui.maxInlineImages"));
@@ -827,8 +851,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		// capability (`TERMINAL.textSizing` defaults on for Kitty) so it stays off
 		// unless the user opts in, and never emits raw escapes on other terminals.
 		setTerminalTextSizing(settings.get("tui.textSizing") && TERMINAL.textSizing);
-		this.chatContainer = new TranscriptContainer();
-		this.pendingMessagesContainer = new AnchoredLiveContainer();
+		this.chatContainer = new ColumnTranscriptContainer();
+		this.pendingMessagesContainer = new ColumnAnchoredLiveContainer();
 		this.statusContainer = new AnchoredLiveContainer();
 		this.todoContainer = new AnchoredLiveContainer();
 		this.subagentContainer = new AnchoredLiveContainer();
@@ -1114,6 +1138,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// the only part of the frame that can own a second column, because
 		// transcript rows are already committed to native scrollback. Narrower than
 		// `minLeft + minRail + 3` and this collapses to the plain stack.
+		//
+		// With `tui.composerColumn` the composer itself moves into that column and
+		// the transcript keeps the left one (see ColumnTranscriptContainer). The
+		// status line is the footer either way: it spans both columns.
 		this.ui.addChild(
 			new LiveSplit(
 				[
@@ -1131,10 +1159,10 @@ export class InteractiveMode implements InteractiveModeContext {
 					this.hookWidgetContainerAbove,
 					this.editorContainer,
 					this.hookWidgetContainerBelow,
-					this.statusLine,
 				],
 				[this.todoContainer, this.subagentContainer],
-				{ minLeft: 80, minRail: 40, maxRail: 60 },
+				LIVE_SPLIT_LAYOUT,
+				[this.statusLine],
 			),
 		);
 		this.ui.setFocus(this.editor);
