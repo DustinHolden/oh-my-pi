@@ -31,6 +31,7 @@ import {
 	Markdown,
 	ProcessTerminal,
 	Spacer,
+	setMaxContentWidth,
 	setTerminalTextSizing,
 	setTuiTight,
 	TERMINAL,
@@ -167,6 +168,7 @@ import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
+import { LiveSplit } from "./components/live-split";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
@@ -815,6 +817,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		setTuiTight(settings.get("tui.tight"));
+		setMaxContentWidth(settings.get("tui.maxContentWidth"));
 		setMarkdownMermaidRendering(settings.get("tui.renderMermaid"));
 		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"));
 		this.ui.setMaxInlineImages(settings.get("tui.maxInlineImages"));
@@ -1106,23 +1109,34 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.todoContainer);
-		this.ui.addChild(this.subagentContainer);
-		this.ui.addChild(this.btwContainer);
-		this.ui.addChild(this.omfgContainer);
-		this.ui.addChild(this.cleanseContainer);
-		this.ui.addChild(this.errorBannerContainer);
-		this.ui.addChild(this.modelCycleContainer);
-		this.ui.addChild(this.deferredCommandContainer);
-		// Working loader / transient status sits below the sticky todo + subagent
-		// HUDs, just above the editor's hook-widget top margin — so it reads next to
-		// the prompt while keeping the one-line gap above the editor.
-		this.ui.addChild(this.statusContainer);
-		this.ui.addChild(this.attachmentChipsContainer);
-		this.ui.addChild(this.hookWidgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.hookWidgetContainerBelow);
-		this.ui.addChild(this.statusLine);
+		// Composer block. On a wide terminal the sticky HUDs move into a right-hand
+		// rail beside the composer instead of stacking above it: the live region is
+		// the only part of the frame that can own a second column, because
+		// transcript rows are already committed to native scrollback. Narrower than
+		// `minLeft + minRail + 3` and this collapses to the plain stack.
+		this.ui.addChild(
+			new LiveSplit(
+				[
+					this.btwContainer,
+					this.omfgContainer,
+					this.cleanseContainer,
+					this.errorBannerContainer,
+					this.modelCycleContainer,
+					this.deferredCommandContainer,
+					// Working loader / transient status sits just above the editor's
+					// hook-widget top margin — so it reads next to the prompt while
+					// keeping the one-line gap above the editor.
+					this.statusContainer,
+					this.attachmentChipsContainer,
+					this.hookWidgetContainerAbove,
+					this.editorContainer,
+					this.hookWidgetContainerBelow,
+					this.statusLine,
+				],
+				[this.todoContainer, this.subagentContainer],
+				{ minLeft: 80, minRail: 40, maxRail: 60 },
+			),
+		);
 		this.ui.setFocus(this.editor);
 		this.syncComposerShape();
 
