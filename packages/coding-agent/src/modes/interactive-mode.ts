@@ -540,6 +540,30 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
 	return ["", theme.bold(theme.fg("accent", "Subagents")), ...rows.map(line => ` ${line}`)];
 }
 
+/**
+ * Sticky HUD whose rows are built at render time rather than snapshotted when
+ * the state changed. Two things depend on that: the rows are sized to the
+ * column the HUD actually lands in (the rail's width, not the terminal's), and
+ * an elastic HUD can read the row budget the layout published for this frame.
+ * Text does the wrapping and gutter, exactly as the snapshot did.
+ */
+class LiveHud implements Component {
+	readonly #text = new Text("", 1, 0);
+
+	constructor(private readonly lines: (width: number) => readonly string[]) {}
+
+	render(width: number): readonly string[] {
+		const lines = this.lines(width);
+		if (lines.length === 0) return [];
+		this.#text.setText(lines.join("\n"));
+		return this.#text.render(width);
+	}
+
+	invalidate(): void {
+		this.#text.invalidate();
+	}
+}
+
 const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
 
 export class InteractiveMode implements InteractiveModeContext {
@@ -789,6 +813,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#observerUiSyncTimer?: NodeJS.Timeout;
 	#observerUiSyncNeedsTodoReconcile = false;
+	/** Owns the live region's geometry; source of the rail's HUD row budget. */
+	#liveSplit?: LiveSplit;
 	#agentRegistryUnsubscribe?: () => void;
 	#agentRegistrySubscriptionTarget?: AgentRegistry;
 	#mcpStatusOrder: string[] = [];
@@ -1142,29 +1168,28 @@ export class InteractiveMode implements InteractiveModeContext {
 		// With `tui.composerColumn` the composer itself moves into that column and
 		// the transcript keeps the left one (see ColumnTranscriptContainer). The
 		// status line is the footer either way: it spans both columns.
-		this.ui.addChild(
-			new LiveSplit(
-				[
-					this.btwContainer,
-					this.omfgContainer,
-					this.cleanseContainer,
-					this.errorBannerContainer,
-					this.modelCycleContainer,
-					this.deferredCommandContainer,
-					// Working loader / transient status sits just above the editor's
-					// hook-widget top margin — so it reads next to the prompt while
-					// keeping the one-line gap above the editor.
-					this.statusContainer,
-					this.attachmentChipsContainer,
-					this.hookWidgetContainerAbove,
-					this.editorContainer,
-					this.hookWidgetContainerBelow,
-				],
-				[this.todoContainer, this.subagentContainer],
-				LIVE_SPLIT_LAYOUT,
-				[this.statusLine],
-			),
+		this.#liveSplit = new LiveSplit(
+			[
+				this.btwContainer,
+				this.omfgContainer,
+				this.cleanseContainer,
+				this.errorBannerContainer,
+				this.modelCycleContainer,
+				this.deferredCommandContainer,
+				// Working loader / transient status sits just above the editor's
+				// hook-widget top margin - so it reads next to the prompt while
+				// keeping the one-line gap above the editor.
+				this.statusContainer,
+				this.attachmentChipsContainer,
+				this.hookWidgetContainerAbove,
+				this.editorContainer,
+				this.hookWidgetContainerBelow,
+			],
+			[this.todoContainer, this.subagentContainer],
+			LIVE_SPLIT_LAYOUT,
+			[this.statusLine],
 		);
+		this.ui.addChild(this.#liveSplit);
 		this.ui.setFocus(this.editor);
 		this.syncComposerShape();
 
@@ -2386,14 +2411,29 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#renderTodoList(): void {
 		this.todoContainer.clear();
+		// Presence is decided here (the container's live-region seam depends on
+		// it); the rows themselves are built per frame by #todoHudLines.
+		if (this.todoPhases.every(phase => phase.tasks.length === 0)) return;
+		this.todoContainer.addChild(new LiveHud(() => this.#todoHudLines()));
+	}
+
+	#todoHudLines(): readonly string[] {
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
-		if (phases.length === 0) return;
+		if (phases.length === 0) return [];
 		const expanded = this.todoExpanded;
 		const multiPhase = phases.length > 1;
 		const activeIdx = phases.indexOf(this.#getActivePhase(phases) ?? phases[0]);
-		// Fixed budgets keep the HUD bounded regardless of plan size / progress.
-		const subsequentStageCap = 4; // stages shown after the active one (a trailing summary row covers the rest)
-		const activeTaskCap = 5; // open tasks previewed for the active stage
+		// Stages shown after the active one; a trailing summary row covers the rest.
+		const subsequentStageCap = 4;
+		// Open tasks previewed for the active stage. The stacked layout keeps the
+		// fixed preview budget, which is what bounds the HUD when it is eating
+		// transcript height. A composer column instead publishes the rows it has
+		// spare above the composer, and those rows are free: spend them, minus
+		// the block's own chrome (blank + title + tail) and a two-row slack for
+		// task lines that wrap in a narrow rail.
+		const railRows = this.#liveSplit?.railRowBudget() ?? 0;
+		const stageRows = Math.min(phases.length - activeIdx, 1 + subsequentStageCap);
+		const activeTaskCap = railRows > 0 ? Math.max(5, railRows - stageRows - 5) : 5;
 
 		const activeDescs = this.#getActiveSubagentDescriptions();
 		// A pending todo "lights up" (accent) when an in-flight subagent is doing
@@ -2497,20 +2537,22 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		const tailFilled = Math.max(0, Math.min(filled - contentLines.length, tail.length));
 		lines.push(` ${theme.fg("accent", tail.slice(0, tailFilled))}${theme.fg("dim", tail.slice(tailFilled))}`);
-		this.todoContainer.addChild(new Text(lines.join("\n"), 1, 0));
+		return lines;
 	}
 
 	/**
 	 * Anchored HUD of in-flight subagents, mirroring the Todos block above the
 	 * editor. Driven entirely by observer-registry change events, so rows appear
 	 * on spawn and the whole block clears itself once the last subagent leaves
-	 * the "active" state.
+	 * the "active" state. The rows are rebuilt per frame from the live registry,
+	 * so a long task line is truncated to the column the HUD lands in.
 	 */
 	#renderSubagentList(): void {
 		this.subagentContainer.clear();
-		const lines = renderSubagentHudLines(this.#observerRegistry.getSessions(), this.ui.terminal.columns);
-		if (lines.length === 0) return;
-		this.subagentContainer.addChild(new Text(lines.join("\n"), 1, 0));
+		if (renderSubagentHudLines(this.#observerRegistry.getSessions(), this.ui.terminal.columns).length === 0) return;
+		this.subagentContainer.addChild(
+			new LiveHud(width => renderSubagentHudLines(this.#observerRegistry.getSessions(), width)),
+		);
 	}
 
 	async #loadTodoList(): Promise<void> {

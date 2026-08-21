@@ -209,4 +209,119 @@ describe("LiveSplit in a real frame", () => {
 			await term.flush();
 		}
 	});
+
+	/**
+	 * The composer column is pinned to the viewport bottom: the HUDs sit at the
+	 * top of the block and the free rows go between them, so the prompt is where
+	 * the eye (and the muscle memory) expects it however short the session is.
+	 */
+	it("pins the composer column to the bottom of the viewport and publishes the HUD budget", async () => {
+		if (process.platform === "win32") return;
+		setComposerColumn(true);
+
+		const term = new VirtualTerminal(200, 12, 10_000);
+		const scheduler = new StressRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const transcript = new ColumnTranscript();
+		const editor = new Mutable(["> prompt"]);
+		const hud = new Mutable(["TODO 1 pending"]);
+		const split = new LiveSplit([editor], [hud], LIVE_SPLIT_LAYOUT, [new Mutable(["status line"])]);
+		tui.addChild(transcript);
+		tui.addChild(split);
+
+		try {
+			tui.start();
+			transcript.setLines(["TRANSCRIPT-000", "TRANSCRIPT-001"]);
+			tui.requestRender();
+			await scheduler.drain(term);
+
+			const viewport = plain(term.getViewport());
+			// 12 rows - 2 transcript = 10 for the block; footer and composer take
+			// one each, so the HUDs may spend 8 and the pad fills the rest.
+			expect(split.railRowBudget()).toBe(8);
+			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(10);
+			expect(viewport.findIndex(row => row.includes("status line"))).toBe(11);
+			expect(viewport.findIndex(row => row.includes("TODO 1 pending"))).toBe(2);
+
+			// A taller HUD eats the pad, never the composer's row.
+			hud.setLines(["TODO 1 done", "TODO 2 pending", "TODO 3 pending"]);
+			tui.requestRender();
+			await scheduler.drain(term);
+
+			const grown = plain(term.getViewport());
+			expect(grown.findIndex(row => row.includes("> prompt"))).toBe(10);
+			expect(grown.findIndex(row => row.includes("TODO 3 pending"))).toBe(4);
+			// Once the frame outgrows the viewport the pad is gone: the block
+			// behaves exactly as an unpinned one, the transcript scrolls off the
+			// top, and the composer lands on the bottom rows on its own.
+			transcript.setLines(Array.from({ length: 20 }, (_, i) => `TRANSCRIPT-${String(i).padStart(3, "0")}`));
+			tui.requestRender();
+			await scheduler.drain(term);
+
+			const scrolled = plain(term.getViewport());
+			expect(split.railRowBudget()).toBe(0);
+			expect(scrolled.findIndex(row => row.includes("TODO 1 done"))).toBe(7);
+			expect(scrolled.findIndex(row => row.includes("> prompt"))).toBe(10);
+			expect(scrolled.findIndex(row => row.includes("status line"))).toBe(11);
+		} finally {
+			tui.stop();
+			await term.flush();
+		}
+	});
+
+	/**
+	 * The elastic-HUD contract: a rail child that sizes itself to the published
+	 * budget must see *this* frame's number, not the previous frame's, or the
+	 * HUD lags a keystroke behind every time the composer grows a row.
+	 */
+	it("publishes the HUD budget before the rail children render", async () => {
+		if (process.platform === "win32") return;
+		setComposerColumn(true);
+
+		const term = new VirtualTerminal(200, 12, 10_000);
+		const scheduler = new StressRenderScheduler();
+		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
+		const transcript = new ColumnTranscript();
+		const editor = new Mutable(["> prompt"]);
+		const seen: number[] = [];
+		let split: LiveSplit;
+		const elastic: Component = {
+			render() {
+				const budget = split.railRowBudget();
+				seen.push(budget);
+				return Array.from({ length: budget }, (_, i) => `HUD-${i}`);
+			},
+		};
+		split = new LiveSplit([editor], [elastic], LIVE_SPLIT_LAYOUT, [new Mutable(["status line"])]);
+		tui.addChild(transcript);
+		tui.addChild(split);
+
+		try {
+			tui.start();
+			transcript.setLines(["TRANSCRIPT-000", "TRANSCRIPT-001"]);
+			tui.requestRender();
+			await scheduler.drain(term);
+
+			// 12 rows - 2 transcript - 1 footer - 1 composer = 8.
+			expect(seen.at(-1)).toBe(8);
+			const viewport = plain(term.getViewport());
+			expect(viewport.findIndex(row => row.includes("HUD-7"))).toBe(9);
+			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(10);
+
+			// A composer that grows two rows hands the HUD two fewer, in the same
+			// frame: nothing is clipped and the prompt stays on the bottom row.
+			editor.setLines(["> prompt", "> second", "> third"]);
+			tui.requestComponentRender(split);
+			await scheduler.drain(term);
+
+			expect(seen.at(-1)).toBe(6);
+			const grown = plain(term.getViewport());
+			expect(grown.findIndex(row => row.includes("HUD-5"))).toBe(7);
+			expect(grown.some(row => row.includes("HUD-6"))).toBe(false);
+			expect(grown.findIndex(row => row.includes("> third"))).toBe(10);
+		} finally {
+			tui.stop();
+			await term.flush();
+		}
+	});
 });

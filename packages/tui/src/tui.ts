@@ -230,6 +230,24 @@ export interface NativeScrollbackCommittedRows {
 }
 
 /**
+ * Opt-in bottom-anchor signal. Before rendering a root child the engine reports
+ * how many terminal rows lie between that child's first row and the bottom of
+ * the viewport, so a component can pad itself to sit flush with the screen
+ * bottom instead of floating directly under the transcript.
+ *
+ * The count is derived from this frame's row offset and the previous frame's
+ * window top, which is a fixed point rather than a lag: padding to the reported
+ * height makes the frame exactly fill the viewport, and `windowTop` then stays
+ * put (`max(committedRows, frameLength - height)` is unchanged by rows added
+ * below the seam). When content already overflows the viewport the report is at
+ * most the component's own height, so the padding collapses to nothing and the
+ * frame behaves exactly as an unpinned one.
+ */
+export interface ViewportRowsBelow {
+	setViewportRowsBelow(rows: number): void;
+}
+
+/**
  * Width-independent source boundary for multiplexer resize epochs. Capture
  * reads the last rendered source state; resolve maps that same logical boundary
  * into the most recent render's physical rows at its new width. The current
@@ -259,6 +277,10 @@ function prepareNativeScrollbackReplay(component: Component): void {
 
 function setNativeScrollbackCommittedRows(component: Component, rows: number): void {
 	(component as Component & Partial<NativeScrollbackCommittedRows>).setNativeScrollbackCommittedRows?.(rows);
+}
+
+function setViewportRowsBelow(component: Component, rows: number): void {
+	(component as Component & Partial<ViewportRowsBelow>).setViewportRowsBelow?.(rows);
 }
 
 function getNativeScrollbackWidthEpoch(component: Component): NativeScrollbackWidthEpoch | undefined {
@@ -1757,6 +1779,10 @@ export class TUI extends Container {
 						Math.min(prevRows, Math.max(0, componentCommittedRows - prevStart)),
 					);
 				}
+				// Rows from this child's first row down to the viewport bottom, in
+				// the previous frame's window coordinates: a bottom-anchored child
+				// pads itself to that height (see ViewportRowsBelow).
+				setViewportRowsBelow(child, Math.max(0, this.terminal.rows - Math.max(0, offset - this.#windowTopRow)));
 				childLines = child.render(width);
 				widthEpochRevision = getNativeScrollbackWidthEpochRevision(child);
 				const liveRegionStart = getNativeScrollbackLiveRegionStart(child);

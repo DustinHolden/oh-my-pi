@@ -128,6 +128,28 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 		return true;
 	}
 
+	/**
+	 * Rows between this block's first row and the bottom of the viewport, fed by
+	 * the engine each frame. Zero until the first frame reports.
+	 */
+	#rowsBelow = 0;
+
+	/** Rows the HUDs may spend in the column layout; 0 in the stacked layout. */
+	#railRows = 0;
+
+	setViewportRowsBelow(rows: number): void {
+		this.#rowsBelow = rows;
+	}
+
+	/**
+	 * Rows the rail HUDs can fill without pushing the composer off the bottom,
+	 * as measured on the last painted frame. Deliberately independent of the
+	 * HUDs' own height: a budget that shrank as the HUD grew would oscillate.
+	 */
+	railRowBudget(): number {
+		return this.#railRows;
+	}
+
 	render(width: number): readonly string[] {
 		// Column layout: the composer joins the HUDs in the right column and the
 		// left column is left to the transcript, which already reserved it.
@@ -136,16 +158,36 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 		const railChildren = column ? this.#columnOrder : this.rail;
 		const leftChildren = column ? EMPTY : this.left;
 
-		const railWidth = railColumns(width, options, !column);
-		const railLines: string[] = [];
-		if (railWidth > 0) {
-			for (const child of railChildren) railLines.push(...child.render(railWidth));
-		}
-
 		// The footer spans both columns: the status line is the densest row in
 		// the frame and a third of the terminal truncates it.
 		const footerLines: string[] = [];
 		for (const child of this.footer) footerLines.push(...child.render(width));
+
+		const railWidth = railColumns(width, options, !column);
+		// Stale budgets are worse than none: a HUD that kept spending column rows
+		// after a toggle-off or a resize would eat transcript height.
+		this.#railRows = 0;
+		const railLines: string[] = [];
+		if (railWidth > 0 && column) {
+			// Bottom-pinned column: HUDs at the top of the block (beside the
+			// transcript tail, where they have room to grow), the free viewport
+			// rows in the middle, the composer flush with the screen bottom. The
+			// pad collapses to nothing once the frame outgrows the viewport, so
+			// a scrolling session behaves exactly as an unpinned one.
+			//
+			// Composer first: its height sets the HUD budget the rail children
+			// read while rendering, so an elastic HUD sees this frame's number.
+			const composerLines: string[] = [];
+			for (const child of this.left) composerLines.push(...child.render(railWidth));
+			this.#railRows = Math.max(0, this.#rowsBelow - footerLines.length - composerLines.length);
+			const hudLines: string[] = [];
+			for (const child of this.rail) hudLines.push(...child.render(railWidth));
+			railLines.push(...hudLines);
+			for (let i = Math.max(0, this.#railRows - hudLines.length); i > 0; i--) railLines.push("");
+			railLines.push(...composerLines);
+		} else if (railWidth > 0) {
+			for (const child of this.rail) railLines.push(...child.render(railWidth));
+		}
 
 		// No rail (too narrow, or nothing to show beside the composer): stack
 		// everything at full width in the pre-split order.
