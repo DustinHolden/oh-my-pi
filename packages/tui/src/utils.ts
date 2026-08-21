@@ -649,3 +649,22 @@ export function isTuiTight(): boolean {
 export function getPaddingX(basePadding: number): number {
 	return globalTight ? Math.max(0, basePadding - 1) : basePadding;
 }
+
+let globalMaxContentWidth = 0;
+
+/**
+ * Column cap for wrapped text. 0 (default) disables it.
+ *
+ * An ultrawide terminal hands components 300+ columns and prose wrapped at that
+ * measure is unreadable. The cap narrows the *wrap width* only: the frame still
+ * spans the full terminal, box chrome still pads to it, so nothing that aligns
+ * against `width` moves.
+ */
+export function setMaxContentWidth(cols: number): void {
+	globalMaxContentWidth = Number.isFinite(cols) && cols > 0 ? Math.floor(cols) : 0;
+}
+
+/** Clamp a computed content width to the configured measure. */
+export function capContentWidth(contentWidth: number): number {
+	return globalMaxContentWidth > 0 ? Math.min(contentWidth, globalMaxContentWidth) : contentWidth;
+}

@@ -4,7 +4,7 @@ import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
 import type { Component, OverlayHandle, ResizeScrollbackMode } from "@oh-my-pi/pi-tui";
-import { Loader, Spacer, setTuiTight, Text } from "@oh-my-pi/pi-tui";
+import { Loader, Spacer, setMaxContentWidth, setTuiTight, Text } from "@oh-my-pi/pi-tui";
 import { getAgentDbPath, getAgentDir, getProjectDir, normalizePathForComparison } from "@oh-my-pi/pi-utils";
 import {
 	type AdvisorConfigScope,
@@ -577,6 +577,15 @@ export class SelectorController {
 				break;
 			case "tui.tight":
 				setTuiTight(value as boolean);
+				this.ctx.ui.invalidate();
+				this.ctx.ui.requestRender();
+				break;
+
+			case "tui.maxContentWidth":
+				// Rows already committed to native scrollback keep the measure they
+				// were wrapped at (the documented resize behaviour); everything still
+				// live re-wraps on the next paint.
+				setMaxContentWidth(value as number);
 				this.ctx.ui.invalidate();
 				this.ctx.ui.requestRender();
 				break;
