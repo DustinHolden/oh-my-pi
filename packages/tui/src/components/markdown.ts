@@ -19,6 +19,7 @@ import type {
 } from "../tui";
 import {
 	applyBackgroundToLine,
+	capContentWidth,
 	Ellipsis,
 	encodeTextSized,
 	getPaddingX,
@@ -1763,16 +1764,23 @@ export class Markdown
 	}
 
 	render(width: number): readonly string[] {
-		if (this.#tableLayoutWidth !== undefined && this.#tableLayoutWidth !== width) {
+		// Content width first: the `tui.maxContentWidth` cap narrows the wrap
+		// measure without shrinking the frame, and every cache below has to key on
+		// the measure that actually produced the rows - keying on the raw terminal
+		// width would serve pre-cap lines after the setting changes.
+		const paddingX = this.#ignoreTight ? this.#paddingX : getPaddingX(this.#paddingX);
+		const contentWidth = capContentWidth(Math.max(1, width - paddingX * 2));
+		const measuredWidth = contentWidth + paddingX * 2;
+		if (this.#tableLayoutWidth !== undefined && this.#tableLayoutWidth !== measuredWidth) {
 			this.#clearTableLayouts();
 			this.invalidate();
 		}
-		this.#tableLayoutWidth = width;
+		this.#tableLayoutWidth = measuredWidth;
 		// L1: per-instance cache — fastest path for repeated renders of the same
 		// instance at the same width (e.g. resize debounce, repeated redraws).
 		// Returning the cached reference is load-bearing: parents memoize their
 		// concatenation on reference equality.
-		if (this.#cachedLines && this.#cachedText === this.#text && this.#cachedWidth === width) {
+		if (this.#cachedLines && this.#cachedText === this.#text && this.#cachedWidth === measuredWidth) {
 			this.#recordLastRenderedState(this.#cachedLines.length > 0);
 			return this.#cachedLines;
 		}
@@ -1781,14 +1789,10 @@ export class Markdown
 		// empty text, non-streaming full render) exposes no settled rows.
 		this.#lastRenderSettledRows = 0;
 
-		// Calculate available width for content (subtract horizontal padding)
-		const paddingX = this.#ignoreTight ? this.#paddingX : getPaddingX(this.#paddingX);
-		const contentWidth = Math.max(1, width - paddingX * 2);
-
 		// Don't render anything if there's no actual text
 		if (!this.#text || this.#text.trim() === "") {
 			this.#cachedText = this.#text;
-			this.#cachedWidth = width;
+			this.#cachedWidth = measuredWidth;
 			this.#cachedLines = EMPTY_RENDER_LINES;
 			this.#recordLastRenderedState(false);
 			return EMPTY_RENDER_LINES;
@@ -1798,7 +1802,7 @@ export class Markdown
 		const normalizedText = this.transientRenderCache
 			? replaceTabs(this.#text)
 			: repairOrphanClosingFence(replaceTabs(this.#text));
-		const signature = this.#renderSignature(width, paddingX);
+		const signature = this.#renderSignature(measuredWidth, paddingX);
 
 		// L2: module-level LRU — survives component disposal/recreation across
 		// session-tree navigations. Key encodes every dimension that affects the
@@ -1826,7 +1830,7 @@ export class Markdown
 				}));
 				// Populate L1 so subsequent calls from this instance are O(1) map lookup.
 				this.#cachedText = this.#text;
-				this.#cachedWidth = width;
+				this.#cachedWidth = measuredWidth;
 				this.#cachedLines = cached.lines;
 				this.#recordLastRenderedState(cached.lines.length > 0);
 				return cached.lines;
@@ -1858,7 +1862,7 @@ export class Markdown
 		// mutate it (Component render contract); the L2 entry is shared across
 		// instances keyed on identical inputs.
 		this.#cachedText = this.#text;
-		this.#cachedWidth = width;
+		this.#cachedWidth = measuredWidth;
 		this.#cachedLines = result;
 
 		// Update L2 module-level LRU so future instances with the same key skip

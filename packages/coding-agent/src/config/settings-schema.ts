@@ -1071,6 +1071,17 @@ export const SETTINGS_SCHEMA = {
 			description: "Remove the 1-character horizontal padding from the left and right of the terminal output",
 		},
 	},
+	"tui.maxContentWidth": {
+		type: "number",
+		default: 0,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Max Content Width",
+			description:
+				"Cap the column measure used to wrap prose (0 = use the full terminal width). Ultrawide terminals hand the transcript 300+ columns; ~100-120 keeps lines readable while boxes and rules still span the screen.",
+		},
+	},
 	"tui.scrollbackRebuild": {
 		type: "boolean",
 		default: false,
