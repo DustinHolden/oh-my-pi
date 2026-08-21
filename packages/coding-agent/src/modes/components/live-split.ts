@@ -47,6 +47,16 @@ export interface LiveSplitOptions {
 }
 
 /**
+ * Opt-in signal for a rail child that can size itself to the rows the layout
+ * has spare. Pushed before the child renders, so an elastic HUD sees this
+ * frame's number rather than the previous frame's; zero whenever the layout has
+ * no spare rows to give, which is every frame of the stacked layout.
+ */
+export interface RailRowBudget {
+	setRailRowBudget(rows: number): void;
+}
+
+/**
  * Rail geometry: the composer keeps the wide left column, the HUDs get a
  * readable strip. Column geometry has to be wide enough to *type* in, so it
  * trades transcript width for composer width.
@@ -134,20 +144,8 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 	 */
 	#rowsBelow = 0;
 
-	/** Rows the HUDs may spend in the column layout; 0 in the stacked layout. */
-	#railRows = 0;
-
 	setViewportRowsBelow(rows: number): void {
 		this.#rowsBelow = rows;
-	}
-
-	/**
-	 * Rows the rail HUDs can fill without pushing the composer off the bottom,
-	 * as measured on the last painted frame. Deliberately independent of the
-	 * HUDs' own height: a budget that shrank as the HUD grew would oscillate.
-	 */
-	railRowBudget(): number {
-		return this.#railRows;
 	}
 
 	render(width: number): readonly string[] {
@@ -164,9 +162,6 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 		for (const child of this.footer) footerLines.push(...child.render(width));
 
 		const railWidth = railColumns(width, options, !column);
-		// Stale budgets are worse than none: a HUD that kept spending column rows
-		// after a toggle-off or a resize would eat transcript height.
-		this.#railRows = 0;
 		const railLines: string[] = [];
 		if (railWidth > 0 && column) {
 			// Bottom-pinned column: HUDs at the top of the block (beside the
@@ -175,25 +170,39 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 			// pad collapses to nothing once the frame outgrows the viewport, so
 			// a scrolling session behaves exactly as an unpinned one.
 			//
-			// Composer first: its height sets the HUD budget the rail children
-			// read while rendering, so an elastic HUD sees this frame's number.
+			// Composer first: its height decides the budget the rail children are
+			// handed, so an elastic HUD sees this frame's number. The budget is
+			// deliberately independent of the HUDs' own height - one that shrank
+			// as the HUD grew would oscillate.
 			const composerLines: string[] = [];
 			for (const child of this.left) composerLines.push(...child.render(railWidth));
-			this.#railRows = Math.max(0, this.#rowsBelow - footerLines.length - composerLines.length);
+			const budget = Math.max(0, this.#rowsBelow - footerLines.length - composerLines.length);
 			const hudLines: string[] = [];
-			for (const child of this.rail) hudLines.push(...child.render(railWidth));
+			for (const child of this.rail) {
+				setRailRowBudget(child, budget);
+				hudLines.push(...child.render(railWidth));
+			}
 			railLines.push(...hudLines);
-			for (let i = Math.max(0, this.#railRows - hudLines.length); i > 0; i--) railLines.push("");
+			for (let i = Math.max(0, budget - hudLines.length); i > 0; i--) railLines.push("");
 			railLines.push(...composerLines);
 		} else if (railWidth > 0) {
-			for (const child of this.rail) railLines.push(...child.render(railWidth));
+			// Stacked rail: the HUDs are eating transcript height, so they get no
+			// budget to spend. Pushed, not merely omitted, so a toggle-off or a
+			// resize cannot leave a HUD spending rows the layout no longer has.
+			for (const child of this.rail) {
+				setRailRowBudget(child, 0);
+				railLines.push(...child.render(railWidth));
+			}
 		}
 
 		// No rail (too narrow, or nothing to show beside the composer): stack
 		// everything at full width in the pre-split order.
 		if (railLines.length === 0) {
 			const stacked: string[] = [];
-			for (const child of railChildren) stacked.push(...child.render(width));
+			for (const child of railChildren) {
+				setRailRowBudget(child, 0);
+				stacked.push(...child.render(width));
+			}
 			for (const child of leftChildren) stacked.push(...child.render(width));
 			stacked.push(...footerLines);
 			this.#hasRows = stacked.length > 0;
@@ -224,6 +233,11 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 	dispose(): void {
 		for (const child of this.children) child.dispose?.();
 	}
+}
+
+/** Hands a rail child its row budget when it implements the opt-in protocol. */
+function setRailRowBudget(child: Component, rows: number): void {
+	(child as Component & Partial<RailRowBudget>).setRailRowBudget?.(rows);
 }
 
 /**

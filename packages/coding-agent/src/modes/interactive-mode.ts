@@ -168,7 +168,13 @@ import type { EvalExecutionComponent } from "./components/eval-execution";
 import type { HookEditorComponent } from "./components/hook-editor";
 import type { HookInputComponent } from "./components/hook-input";
 import type { HookSelectorComponent, HookSelectorSlider } from "./components/hook-selector";
-import { LIVE_SPLIT_LAYOUT, LiveSplit, setComposerColumn, transcriptColumnWidth } from "./components/live-split";
+import {
+	LIVE_SPLIT_LAYOUT,
+	LiveSplit,
+	type RailRowBudget,
+	setComposerColumn,
+	transcriptColumnWidth,
+} from "./components/live-split";
 import { type PlanReviewAnnotationState, PlanReviewOverlay } from "./components/plan-review-overlay";
 import { StatusLineComponent } from "./components/status-line";
 import { stopSharedSpinnerTicker, type ToolExecutionHandle } from "./components/tool-execution";
@@ -544,16 +550,22 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
  * Sticky HUD whose rows are built at render time rather than snapshotted when
  * the state changed. Two things depend on that: the rows are sized to the
  * column the HUD actually lands in (the rail's width, not the terminal's), and
- * an elastic HUD can read the row budget the layout published for this frame.
+ * an elastic HUD is handed the row budget the layout has spare this frame - 0
+ * in the stacked layout, where HUD rows come out of the transcript's height.
  * Text does the wrapping and gutter, exactly as the snapshot did.
  */
-class LiveHud implements Component {
+class LiveHud implements Component, RailRowBudget {
 	readonly #text = new Text("", 1, 0);
+	#budget = 0;
 
-	constructor(private readonly lines: (width: number) => readonly string[]) {}
+	constructor(private readonly lines: (width: number, rowBudget: number) => readonly string[]) {}
+
+	setRailRowBudget(rows: number): void {
+		this.#budget = rows;
+	}
 
 	render(width: number): readonly string[] {
-		const lines = this.lines(width);
+		const lines = this.lines(width, this.#budget);
 		if (lines.length === 0) return [];
 		this.#text.setText(lines.join("\n"));
 		return this.#text.render(width);
@@ -813,8 +825,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	#eventBusUnsubscribers: Array<() => void> = [];
 	#observerUiSyncTimer?: NodeJS.Timeout;
 	#observerUiSyncNeedsTodoReconcile = false;
-	/** Owns the live region's geometry; source of the rail's HUD row budget. */
-	#liveSplit?: LiveSplit;
 	#agentRegistryUnsubscribe?: () => void;
 	#agentRegistrySubscriptionTarget?: AgentRegistry;
 	#mcpStatusOrder: string[] = [];
@@ -1168,7 +1178,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// With `tui.composerColumn` the composer itself moves into that column and
 		// the transcript keeps the left one (see ColumnTranscriptContainer). The
 		// status line is the footer either way: it spans both columns.
-		this.#liveSplit = new LiveSplit(
+		//
+		// The split owns the row budget and pushes it into the HUDs before they
+		// render, so nothing here needs a reference back to it.
+		const liveSplit = new LiveSplit(
 			[
 				this.btwContainer,
 				this.omfgContainer,
@@ -1189,7 +1202,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			LIVE_SPLIT_LAYOUT,
 			[this.statusLine],
 		);
-		this.ui.addChild(this.#liveSplit);
+		this.ui.addChild(liveSplit);
 		this.ui.setFocus(this.editor);
 		this.syncComposerShape();
 
@@ -2414,10 +2427,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Presence is decided here (the container's live-region seam depends on
 		// it); the rows themselves are built per frame by #todoHudLines.
 		if (this.todoPhases.every(phase => phase.tasks.length === 0)) return;
-		this.todoContainer.addChild(new LiveHud(() => this.#todoHudLines()));
+		this.todoContainer.addChild(new LiveHud((_width, rowBudget) => this.#todoHudLines(rowBudget)));
 	}
 
-	#todoHudLines(): readonly string[] {
+	#todoHudLines(railRows: number): readonly string[] {
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
 		if (phases.length === 0) return [];
 		const expanded = this.todoExpanded;
@@ -2431,7 +2444,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// spare above the composer, and those rows are free: spend them, minus
 		// the block's own chrome (blank + title + tail) and a two-row slack for
 		// task lines that wrap in a narrow rail.
-		const railRows = this.#liveSplit?.railRowBudget() ?? 0;
 		const stageRows = Math.min(phases.length - activeIdx, 1 + subsequentStageCap);
 		const activeTaskCap = railRows > 0 ? Math.max(5, railRows - stageRows - 5) : 5;
 

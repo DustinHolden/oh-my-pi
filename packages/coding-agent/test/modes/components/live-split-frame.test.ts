@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
 	LIVE_SPLIT_LAYOUT,
 	LiveSplit,
+	type RailRowBudget,
 	setComposerColumn,
 	transcriptColumnWidth,
 } from "@oh-my-pi/pi-coding-agent/modes/components/live-split";
@@ -42,11 +43,18 @@ class ColumnTranscript extends Transcript {
 	}
 }
 
-class Mutable implements Component {
+class Mutable implements Component, RailRowBudget {
+	/** Every budget the split pushed, newest last. */
+	budgets: number[] = [];
+
 	constructor(private lines: string[]) {}
 
 	setLines(lines: string[]): void {
 		this.lines = [...lines];
+	}
+
+	setRailRowBudget(rows: number): void {
+		this.budgets.push(rows);
 	}
 
 	render(): string[] {
@@ -238,7 +246,7 @@ describe("LiveSplit in a real frame", () => {
 			const viewport = plain(term.getViewport());
 			// 12 rows - 2 transcript = 10 for the block; footer and composer take
 			// one each, so the HUDs may spend 8 and the pad fills the rest.
-			expect(split.railRowBudget()).toBe(8);
+			expect(hud.budgets.at(-1)).toBe(8);
 			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(10);
 			expect(viewport.findIndex(row => row.includes("status line"))).toBe(11);
 			expect(viewport.findIndex(row => row.includes("TODO 1 pending"))).toBe(2);
@@ -259,7 +267,7 @@ describe("LiveSplit in a real frame", () => {
 			await scheduler.drain(term);
 
 			const scrolled = plain(term.getViewport());
-			expect(split.railRowBudget()).toBe(0);
+			expect(hud.budgets.at(-1)).toBe(0);
 			expect(scrolled.findIndex(row => row.includes("TODO 1 done"))).toBe(7);
 			expect(scrolled.findIndex(row => row.includes("> prompt"))).toBe(10);
 			expect(scrolled.findIndex(row => row.includes("status line"))).toBe(11);
@@ -283,16 +291,20 @@ describe("LiveSplit in a real frame", () => {
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const transcript = new ColumnTranscript();
 		const editor = new Mutable(["> prompt"]);
+		// Records the budget it was handed at the moment it renders: a HUD that
+		// read a stale number would lag the composer by a keystroke.
 		const seen: number[] = [];
-		let split: LiveSplit;
-		const elastic: Component = {
-			render() {
-				const budget = split.railRowBudget();
-				seen.push(budget);
-				return Array.from({ length: budget }, (_, i) => `HUD-${i}`);
-			},
-		};
-		split = new LiveSplit([editor], [elastic], LIVE_SPLIT_LAYOUT, [new Mutable(["status line"])]);
+		class Elastic implements Component, RailRowBudget {
+			#budget = 0;
+			setRailRowBudget(rows: number): void {
+				this.#budget = rows;
+			}
+			render(): string[] {
+				seen.push(this.#budget);
+				return Array.from({ length: this.#budget }, (_, i) => `HUD-${i}`);
+			}
+		}
+		const split = new LiveSplit([editor], [new Elastic()], LIVE_SPLIT_LAYOUT, [new Mutable(["status line"])]);
 		tui.addChild(transcript);
 		tui.addChild(split);
 
