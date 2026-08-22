@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import {
 	LIVE_SPLIT_LAYOUT,
 	LiveSplit,
+	type RailRowBudget,
 	setComposerColumn,
 	transcriptColumnWidth,
 } from "@oh-my-pi/pi-coding-agent/modes/components/live-split";
@@ -20,6 +21,19 @@ function widthProbe(seen: number[]): Component {
 			return ["x"];
 		},
 	};
+}
+
+/** Rail child that records every budget the split pushed, newest last. */
+class BudgetProbe implements Component, RailRowBudget {
+	readonly budgets: number[] = [];
+
+	setRailRowBudget(rows: number): void {
+		this.budgets.push(rows);
+	}
+
+	render(): string[] {
+		return ["TODO 1"];
+	}
 }
 
 const OPTS = { minLeft: 80, minRail: 40, maxRail: 60 };
@@ -166,5 +180,43 @@ describe("LiveSplit composer column", () => {
 
 		// Stacked order with the composer back at the bottom, footer last.
 		expect(lines).toEqual(["TODO 1", "> prompt", "status"]);
+	});
+
+	/**
+	 * A HUD sizes itself to the budget it was last handed, so a layout that
+	 * stops being a column has to say so. Both exits from the pinned branch push
+	 * zero explicitly - otherwise a resize below the floor, or a toggle-off,
+	 * leaves the HUD spending viewport rows the layout no longer owns and the
+	 * block overdraws the transcript.
+	 */
+	it("pushes a zero budget when a resize collapses the column, and restores it on the way back", () => {
+		setComposerColumn(true);
+		const hud = new BudgetProbe();
+		const split = new LiveSplit([stub(["> prompt"])], [hud], LIVE_SPLIT_LAYOUT);
+		split.setViewportRowsBelow(10);
+
+		// 10 rows below, no footer, one composer row: the HUD may spend 9.
+		split.render(200);
+		// 100 columns leaves the composer 37 - under minRail 56 - so the column
+		// collapses to the plain stack.
+		split.render(100);
+		split.render(200);
+
+		expect(hud.budgets).toEqual([9, 0, 9]);
+	});
+
+	it("pushes a zero budget when the composer column is turned off", () => {
+		setComposerColumn(true);
+		const hud = new BudgetProbe();
+		const split = new LiveSplit([stub(["> prompt"])], [hud], LIVE_SPLIT_LAYOUT);
+		split.setViewportRowsBelow(10);
+
+		split.render(200);
+		setComposerColumn(false);
+		// Stacked rail: the HUD is eating transcript height now, not viewport
+		// rows the composer left behind.
+		split.render(200);
+
+		expect(hud.budgets).toEqual([9, 0]);
 	});
 });
