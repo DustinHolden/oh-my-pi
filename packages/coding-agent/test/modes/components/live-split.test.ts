@@ -193,23 +193,24 @@ describe("LiveSplit composer column", () => {
 		setComposerColumn(true);
 		const hud = new BudgetProbe();
 		const split = new LiveSplit([stub(["> prompt"])], [hud], LIVE_SPLIT_LAYOUT);
-		split.setViewportRowsBelow(10);
+		split.setViewportRowsBelow(30);
 
-		// 10 rows below, no footer, one composer row: the HUD may spend 9.
+		// 30 rows below, no footer, one composer row: the HUD may spend 29, well
+		// clear of the floor, so this case measures the arithmetic.
 		split.render(200);
 		// 100 columns leaves the composer 37 - under minRail 56 - so the column
 		// collapses to the plain stack.
 		split.render(100);
 		split.render(200);
 
-		expect(hud.budgets).toEqual([9, 0, 9]);
+		expect(hud.budgets).toEqual([29, 0, 29]);
 	});
 
 	it("pushes a zero budget when the composer column is turned off", () => {
 		setComposerColumn(true);
 		const hud = new BudgetProbe();
 		const split = new LiveSplit([stub(["> prompt"])], [hud], LIVE_SPLIT_LAYOUT);
-		split.setViewportRowsBelow(10);
+		split.setViewportRowsBelow(30);
 
 		split.render(200);
 		setComposerColumn(false);
@@ -217,6 +218,31 @@ describe("LiveSplit composer column", () => {
 		// rows the composer left behind.
 		split.render(200);
 
-		expect(hud.budgets).toEqual([9, 0]);
+		expect(hud.budgets).toEqual([29, 0]);
+	});
+
+	/**
+	 * The floor is the whole reason the elastic budget is reachable: a working
+	 * session's transcript runs to the bottom of the screen, so the honest
+	 * spare-row count is near zero and an unfloored HUD would sit at its own
+	 * minimum forever. The HUD is offered the floor while the pin pad keeps
+	 * using the honest count, so overspending costs only the rows the HUD fills.
+	 */
+	it("floors the budget offered to the HUD when the viewport has no spare rows", () => {
+		setComposerColumn(true);
+		const hud = new BudgetProbe();
+		const split = new LiveSplit([stub(["> prompt"])], [hud], LIVE_SPLIT_LAYOUT);
+		// A full transcript: one row left below the block start, which the
+		// composer takes, so the honest budget is zero.
+		split.setViewportRowsBelow(1);
+
+		const lines = split.render(200).map(line => Bun.stripANSI(line).trimEnd());
+
+		expect(hud.budgets).toEqual([16]);
+		// The pad still uses the honest count, so nothing but the HUD's own row
+		// and the composer is drawn - no 16 rows of blank padding.
+		expect(lines.length).toBe(2);
+		expect(lines[0]!.endsWith("TODO 1")).toBe(true);
+		expect(lines[1]!.endsWith("> prompt")).toBe(true);
 	});
 });

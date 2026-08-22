@@ -35,6 +35,18 @@ const DIVIDER_COLUMNS = 3;
 /** Shared empty child list: the left column is unused in the column layout. */
 const EMPTY: readonly Component[] = [];
 
+/**
+ * Rows the HUDs may claim in the column layout even when the viewport has none
+ * spare. A working session's transcript reaches the bottom of the screen, so
+ * the honest spare-row count is near zero and an elastic HUD would sit at its
+ * floor forever - the budget would only ever open up in a session with nothing
+ * in it. Claiming rows the viewport does not have makes the frame outgrow the
+ * screen, which scrolls transcript rows off the top: the same trade the stacked
+ * layout makes unconditionally, except here it is bounded and only paid when a
+ * HUD has content to show.
+ */
+const MIN_RAIL_ROWS = 16;
+
 export interface LiveSplitOptions {
 	/** Minimum content columns the left column needs to keep the rail. */
 	minLeft: number;
@@ -177,9 +189,15 @@ export class LiveSplit implements Component, NativeScrollbackLiveRegion {
 			const composerLines: string[] = [];
 			for (const child of this.left) composerLines.push(...child.render(railWidth));
 			const budget = Math.max(0, this.#rowsBelow - footerLines.length - composerLines.length);
+			// Two different numbers on purpose: the HUDs are offered a floored
+			// budget so they stay useful once the transcript reaches the bottom of
+			// the screen, while the pin pad below still uses the honest spare-row
+			// count. Overspending therefore costs exactly the rows the HUDs
+			// actually fill - the pad absorbs the difference first and the frame
+			// only outgrows the viewport when there is real content to show.
 			const hudLines: string[] = [];
 			for (const child of this.rail) {
-				setRailRowBudget(child, budget);
+				setRailRowBudget(child, Math.max(budget, MIN_RAIL_ROWS));
 				hudLines.push(...child.render(railWidth));
 			}
 			railLines.push(...hudLines);

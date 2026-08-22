@@ -227,7 +227,9 @@ describe("LiveSplit in a real frame", () => {
 		if (process.platform === "win32") return;
 		setComposerColumn(true);
 
-		const term = new VirtualTerminal(200, 12, 10_000);
+		// 32 rows: tall enough that the honest budget clears the rail floor, so
+		// this case measures the pin arithmetic rather than the floor.
+		const term = new VirtualTerminal(200, 32, 10_000);
 		const scheduler = new StressRenderScheduler();
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const transcript = new ColumnTranscript();
@@ -244,11 +246,11 @@ describe("LiveSplit in a real frame", () => {
 			await scheduler.drain(term);
 
 			const viewport = plain(term.getViewport());
-			// 12 rows - 2 transcript = 10 for the block; footer and composer take
-			// one each, so the HUDs may spend 8 and the pad fills the rest.
-			expect(hud.budgets.at(-1)).toBe(8);
-			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(10);
-			expect(viewport.findIndex(row => row.includes("status line"))).toBe(11);
+			// 32 rows - 2 transcript = 30 for the block; footer and composer take
+			// one each, so the HUDs may spend 28 and the pad fills the rest.
+			expect(hud.budgets.at(-1)).toBe(28);
+			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(30);
+			expect(viewport.findIndex(row => row.includes("status line"))).toBe(31);
 			expect(viewport.findIndex(row => row.includes("TODO 1 pending"))).toBe(2);
 
 			// A taller HUD eats the pad, never the composer's row.
@@ -257,20 +259,20 @@ describe("LiveSplit in a real frame", () => {
 			await scheduler.drain(term);
 
 			const grown = plain(term.getViewport());
-			expect(grown.findIndex(row => row.includes("> prompt"))).toBe(10);
+			expect(grown.findIndex(row => row.includes("> prompt"))).toBe(30);
 			expect(grown.findIndex(row => row.includes("TODO 3 pending"))).toBe(4);
 			// Once the frame outgrows the viewport the pad is gone: the block
 			// behaves exactly as an unpinned one, the transcript scrolls off the
 			// top, and the composer lands on the bottom rows on its own.
-			transcript.setLines(Array.from({ length: 20 }, (_, i) => `TRANSCRIPT-${String(i).padStart(3, "0")}`));
+			transcript.setLines(Array.from({ length: 60 }, (_, i) => `TRANSCRIPT-${String(i).padStart(3, "0")}`));
 			tui.requestRender();
 			await scheduler.drain(term);
 
 			const scrolled = plain(term.getViewport());
-			expect(hud.budgets.at(-1)).toBe(0);
-			expect(scrolled.findIndex(row => row.includes("TODO 1 done"))).toBe(7);
-			expect(scrolled.findIndex(row => row.includes("> prompt"))).toBe(10);
-			expect(scrolled.findIndex(row => row.includes("status line"))).toBe(11);
+			expect(hud.budgets.at(-1)).toBe(16);
+			expect(scrolled.findIndex(row => row.includes("TODO 1 done"))).toBe(27);
+			expect(scrolled.findIndex(row => row.includes("> prompt"))).toBe(30);
+			expect(scrolled.findIndex(row => row.includes("status line"))).toBe(31);
 		} finally {
 			tui.stop();
 			await term.flush();
@@ -286,7 +288,7 @@ describe("LiveSplit in a real frame", () => {
 		if (process.platform === "win32") return;
 		setComposerColumn(true);
 
-		const term = new VirtualTerminal(200, 12, 10_000);
+		const term = new VirtualTerminal(200, 32, 10_000);
 		const scheduler = new StressRenderScheduler();
 		const tui = new TUI(term, undefined, { renderScheduler: scheduler });
 		const transcript = new ColumnTranscript();
@@ -314,11 +316,11 @@ describe("LiveSplit in a real frame", () => {
 			tui.requestRender();
 			await scheduler.drain(term);
 
-			// 12 rows - 2 transcript - 1 footer - 1 composer = 8.
-			expect(seen.at(-1)).toBe(8);
+			// 32 rows - 2 transcript - 1 footer - 1 composer = 28.
+			expect(seen.at(-1)).toBe(28);
 			const viewport = plain(term.getViewport());
-			expect(viewport.findIndex(row => row.includes("HUD-7"))).toBe(9);
-			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(10);
+			expect(viewport.findIndex(row => row.includes("HUD-27"))).toBe(29);
+			expect(viewport.findIndex(row => row.includes("> prompt"))).toBe(30);
 
 			// A composer that grows two rows hands the HUD two fewer, in the same
 			// frame: nothing is clipped and the prompt stays on the bottom row.
@@ -326,11 +328,11 @@ describe("LiveSplit in a real frame", () => {
 			tui.requestComponentRender(split);
 			await scheduler.drain(term);
 
-			expect(seen.at(-1)).toBe(6);
+			expect(seen.at(-1)).toBe(26);
 			const grown = plain(term.getViewport());
-			expect(grown.findIndex(row => row.includes("HUD-5"))).toBe(7);
-			expect(grown.some(row => row.includes("HUD-6"))).toBe(false);
-			expect(grown.findIndex(row => row.includes("> third"))).toBe(10);
+			expect(grown.findIndex(row => row.includes("HUD-25"))).toBe(27);
+			expect(grown.some(row => row.includes("HUD-26"))).toBe(false);
+			expect(grown.findIndex(row => row.includes("> third"))).toBe(30);
 		} finally {
 			tui.stop();
 			await term.flush();
